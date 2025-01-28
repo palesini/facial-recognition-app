@@ -128,11 +128,11 @@ const Camera = () => {
   // Renderizar el panel de métricas
   const renderMetrics = () => (
     <div className="results-panel">
-      <h3>Métricas</h3>
-      <p><strong>Rostros detectados:</strong> {metrics.faceCount}</p>
-      <p><strong>Edad promedio:</strong> {metrics.averageAge} años</p>
-      <p><strong>Género predominante:</strong> {metrics.predominantGender}</p>
-      <p><strong>Emociones:</strong></p>
+      <h3>Metrics</h3>
+      <p><strong>Detected Faces:</strong> {metrics.faceCount}</p>
+      <p><strong>Average Age:</strong> {metrics.averageAge} años</p>
+      <p><strong>Predominant Genre:</strong> {metrics.predominantGender}</p>
+      <p><strong>Emotions:</strong></p>
       <ul>
         {Object.entries(metrics.emotions).map(([emotion, value]) => (
           <li key={emotion}>
@@ -145,7 +145,7 @@ const Camera = () => {
 
   return (
     <div>
-      <h2>Cámara de Reconocimiento Facial</h2>
+      <h2>SoFutu FaceTrust AI</h2>
       <div className="camera-container">
         <video
           ref={videoRef}
