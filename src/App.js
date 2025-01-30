@@ -5,7 +5,7 @@ import './styles.css';
 function App() {
   return (
     <div className="App">
-      <h1>Real-Time Emotion Recognition</h1>
+      <h1>Real-Time Facial Recognition</h1>
       <Camera />
     </div>
   );
