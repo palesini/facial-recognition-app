@@ -2,169 +2,152 @@ import React, { useRef, useEffect, useState } from 'react';
 import * as faceapi from 'face-api.js';
 
 const Camera = () => {
-  // Referencias para el video y el canvas
   const videoRef = useRef();
   const canvasRef = useRef();
-
-  // Estado para almacenar las métricas
   const [metrics, setMetrics] = useState({
     faceCount: 0,
     averageAge: 0,
     predominantGender: '',
-    emotions: {},
+    emotions: {}
   });
 
-  // Cargar los modelos de Face-API.js
+  // 1. Cargar modelos
   useEffect(() => {
     const loadModels = async () => {
       try {
-        // Cargar los modelos desde la carpeta "public/models"
         await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
         await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
         await faceapi.nets.faceExpressionNet.loadFromUri('/models');
         await faceapi.nets.ageGenderNet.loadFromUri('/models');
-        console.log('Modelos cargados correctamente');
       } catch (error) {
-        console.error('Error cargando los modelos:', error);
+        console.error("Error loading models:", error);
       }
     };
-
     loadModels();
   }, []);
 
-  // Iniciar la cámara automáticamente
+  // 2. Configurar cámara y canvas
   useEffect(() => {
-    const startCamera = async () => {
+    const setupCamera = async () => {
       try {
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          throw new Error('El navegador no soporta getUserMedia');
-        }
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user' }
+        });
 
-        // Solicitar acceso a la cámara
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
+
+          videoRef.current.onloadedmetadata = () => {
+            const video = videoRef.current;
+            const canvas = canvasRef.current;
+
+            if (video && canvas) {
+              canvas.width = video.videoWidth;
+              canvas.height = video.videoHeight;
+            }
+          };
         }
       } catch (error) {
-        console.error('Error al acceder a la cámara:', error);
-        alert(`Error al acceder a la cámara: ${error.message}`);
+        console.error("Error al acceder a la cámara:", error);
       }
     };
 
-    startCamera();
+    setupCamera();
+
+    // Limpieza al desmontar el componente
+    return () => {
+      if (videoRef.current && videoRef.current.srcObject) {
+        videoRef.current.srcObject.getTracks().forEach(track => track.stop());
+      }
+    };
   }, []);
 
-  // Función para calcular la moda (género predominante)
-  const mode = (arr) => {
-    return arr.sort((a, b) =>
-      arr.filter((v) => v === a).length - arr.filter((v) => v === b).length
-    ).pop();
+  // 3. Detección facial
+  const detectFaces = async () => {
+    if (!videoRef.current || !canvasRef.current) return;
+
+    const detections = await faceapi
+      .detectAllFaces(videoRef.current, new faceapi.TinyFaceDetectorOptions())
+      .withFaceLandmarks()
+      .withFaceExpressions()
+      .withAgeAndGender();
+
+    // Escalar detecciones al tamaño del canvas
+    const resizedDetections = faceapi.resizeResults(detections, {
+      width: videoRef.current.videoWidth,
+      height: videoRef.current.videoHeight
+    });
+
+    // Actualizar métricas
+    const faceCount = detections.length;
+    const totalAge = detections.reduce((sum, d) => sum + d.age, 0);
+    const averageAge = faceCount > 0 ? (totalAge / faceCount).toFixed(1) : 0;
+    const predominantGender = faceCount > 0 ? 
+      detections.reduce((acc, d) => (acc[d.gender] = (acc[d.gender] || 0) + 1, acc), {}) : '';
+    
+    setMetrics({
+      faceCount,
+      averageAge,
+      predominantGender: Object.keys(predominantGender).reduce((a, b) => predominantGender[a] > predominantGender[b] ? a : b, ''),
+      emotions: faceCount > 0 ? detections[0].expressions : {}
+    });
+
+    // Dibujar resultados
+    const ctx = canvasRef.current.getContext('2d');
+    ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+    
+    faceapi.draw.drawDetections(canvasRef.current, resizedDetections);
+    faceapi.draw.drawFaceLandmarks(canvasRef.current, resizedDetections);
+    faceapi.draw.drawFaceExpressions(canvasRef.current, resizedDetections);
+    
+    requestAnimationFrame(detectFaces);
   };
 
-  // Procesar el video en tiempo real
-  const handleVideoPlay = () => {
-    const interval = setInterval(async () => {
-      if (videoRef.current && canvasRef.current) {
-        // Detectar rostros, expresiones, edad y género
-        const detections = await faceapi
-          .detectAllFaces(videoRef.current, new faceapi.TinyFaceDetectorOptions())
-          .withFaceLandmarks()
-          .withFaceExpressions()
-          .withAgeAndGender();
+  // 4. Iniciar detección
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
 
-        // Calcular métricas
-        const faceCount = detections.length;
-        const totalAge = detections.reduce((sum, detection) => sum + detection.age, 0);
-        const averageAge = faceCount > 0 ? (totalAge / faceCount).toFixed(1) : 0;
-        const genders = detections.map((detection) => detection.gender);
-        const predominantGender = genders.length > 0 ? mode(genders) : '';
-        const emotions = detections.reduce((acc, detection) => {
-          Object.entries(detection.expressions).forEach(([emotion, value]) => {
-            acc[emotion] = (acc[emotion] || 0) + value;
-          });
-          return acc;
-        }, {});
+    const handlePlay = () => requestAnimationFrame(detectFaces);
+    video.addEventListener('play', handlePlay);
 
-        // Actualizar el estado de las métricas
-        setMetrics({
-          faceCount,
-          averageAge,
-          predominantGender,
-          emotions,
-        });
-
-        // Dibujar las detecciones en el canvas
-        const context = canvasRef.current.getContext('2d');
-        context.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-        faceapi.matchDimensions(canvasRef.current, {
-          width: 640,
-          height: 480,
-        });
-        const resizedDetections = faceapi.resizeResults(detections, {
-          width: 640,
-          height: 480,
-        });
-        faceapi.draw.drawDetections(canvasRef.current, resizedDetections);
-        faceapi.draw.drawFaceLandmarks(canvasRef.current, resizedDetections);
-        faceapi.draw.drawFaceExpressions(canvasRef.current, resizedDetections);
-
-        // Mostrar edad y género
-        resizedDetections.forEach((detection) => {
-          const { age, gender, genderProbability } = detection;
-          const text = `${Math.round(age)} años, ${gender} (${Math.round(genderProbability * 100)}%)`;
-          const bottomRight = {
-            x: detection.detection.box.bottomRight.x,
-            y: detection.detection.box.bottomRight.y,
-          };
-          new faceapi.draw.DrawTextField([text], bottomRight).draw(canvasRef.current);
-        });
+    return () => {
+      if (video) {
+        video.removeEventListener('play', handlePlay);
       }
-    }, 100); // Procesar cada 100ms
-
-    // Limpiar el intervalo cuando el componente se desmonte
-    return () => clearInterval(interval);
-  };
-
-  // Renderizar el panel de métricas
-  const renderMetrics = () => (
-    <div className="results-panel">
-      <h3>Metrics</h3>
-      <p><strong>Detected Faces:</strong> {metrics.faceCount}</p>
-      <p><strong>Average Age:</strong> {metrics.averageAge} años</p>
-      <p><strong>Predominant Genre:</strong> {metrics.predominantGender}</p>
-      <p><strong>Emotions:</strong></p>
-      <ul>
-        {Object.entries(metrics.emotions).map(([emotion, value]) => (
-          <li key={emotion}>
-            {emotion}: {(value / metrics.faceCount).toFixed(2)}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
+    };
+  }, []);
 
   return (
-    <div>
-      <h2>SoFutu FaceTrust AI</h2>
-      <div className="camera-container">
-        <video
-          ref={videoRef}
-          autoPlay
-          muted
-          playsInline
-          onPlay={handleVideoPlay}
-          width="640"
-          height="480"
-        />
-        <canvas
-          ref={canvasRef}
-          width="640"
-          height="480"
-        />
+    <div className="camera-container">
+      <video 
+        ref={videoRef} 
+        autoPlay 
+        muted 
+        playsInline 
+        className="video-element"
+      />
+      <canvas ref={canvasRef} className="overlay-canvas" />
+      
+      <div className="metrics-panel">
+        <h3>Real-time statistics</h3>
+        <p>👥 Faces detected: {metrics.faceCount}</p>
+        <p>📊 Average age: {metrics.averageAge}</p>
+        <p>👫 Predominant gender: {metrics.predominantGender}</p>
+        <div className="emotions-grid">
+          {Object.entries(metrics.emotions).map(([emotion, value]) => (
+            <div key={emotion} className="emotion-item">
+              <span className="emotion-label">{emotion}:</span>
+              <span className="emotion-value">{(value * 100).toFixed(1)}%</span>
+            </div>
+          ))}
+        </div>
       </div>
-      {renderMetrics()}
     </div>
   );
+};
+
+export default Camera;
 };
 
 export default Camera;
